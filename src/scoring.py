@@ -1,17 +1,21 @@
 wht=500  #weight for open-close
 wo=100	 #weight for open	
 wr=50	#weight for read
-we=500	#weight for exec
-wc=1000	#weight for cpu time	
-
-
+we=1	#weight for exec
+wc=10	#weight for cpu time
 
 def get_sec(time_str):
 	num=time_str.count(":")
 	# print(str(num)+"here")
 	if(num == 2):
 		h, m, s = time_str.split(':')
-		return int(h) * 3600 + int(m) * 60 + int(s)
+		if '-' in str(h):
+			d, h = str(h).split('-')
+			h = 24*int(d) + int(h)
+		else:
+			h = int(h)
+
+		return h * 3600 + int(m) * 60 + int(s)
 	if(num == 1):
 		m, s = time_str.split(':')
 		return int(m)*60+int(s)	

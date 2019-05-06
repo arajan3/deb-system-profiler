@@ -5,6 +5,7 @@ pstmpfs=/tmp/pstmpfs
 mkdir -p $pstmpfs
 psinfo=$pstmpfs/psinfo
 pstmp=$pstmpfs/pstmp
+itval=1
 
 cleanup() {
 	rm -f $pstmp $psinfo
@@ -19,7 +20,9 @@ trap cleanup EXIT SIGINT SIGKILL
 declare -A all_pstimes=
 rm -f $psinfo
 while [ true ]; do
-	sleep 1s
+    echo "Sleeping for $itval secs"
+	sleep ${itval}s
+	echo "profiling now..."
 
 	ps -eo etime,cputime,command | tail -n +2 | grep -v '\[\|\]' | grep -v '\-bash' > $pstmp
 	while read entry; do
@@ -31,6 +34,7 @@ while [ true ]; do
 		fi
 	done < $pstmp
 
+    rm -f $pstmp $psinfo
 	for path in "${!all_pstimes[@]}"; do
 		echo "$path,${all_pstimes[$path]}" >> $psinfo
 	done
