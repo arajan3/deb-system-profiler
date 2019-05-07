@@ -3,8 +3,10 @@ import os
 import scoring
 import shutil
 
-'''
-shutil.copy("/proc/refsinfo", "/tmp/pstmpfs/refsinfo.now")
+smap = {}  ##Map<filename,<score1,score2,score>>
+
+
+#shutil.copy("/proc/refsinfo", "/tmp/pstmpfs/refsinfo.now")
 refs = open("/tmp/pstmpfs/refsinfo.now")
 
 kmap = {}  ##Map<filename,<open,close,read>>
@@ -15,17 +17,14 @@ while (key):
     key, no, nr, nc = os.linesep.join([s for s in key.splitlines() if s]).split(",")
     kmap[key] = [no, nr, nc]
     key = refs.readline()
-'''
 
-smap = {}  ##Map<filename,<score1,score2,score>>
-'''
-smap["null"] = [0, 0, 0]
 for k, value in kmap.items():
     if (k not in smap):
         smap[k] = [0, 0, 0]
-    smap[k][0] = scoring.score1(value[0], value[1], value[2])
+    smap[k][0] = scoring.score1(int(value[0]), int(value[1]), int(value[2]))
 # print(str(k)+" "+str(smap[k][0])+"\n")
-'''
+#print(smap)
+
 
 shutil.copy("/tmp/pstmpfs/psinfo", "/tmp/pstmpfs/psinfo.now")
 ps_in = open("/tmp/pstmpfs/psinfo.now")
@@ -56,6 +55,7 @@ while (key):
     key = ps_in.readline()
 
 for key in smap.keys():
+    #print(key)
     smap[key][2] = smap[key][0] + smap[key][1]
-
-print(smap)
+    print(str(key) + "," + str(smap[key][0]) + "," + str(smap[key][1]) + "," + str(smap[key][2]))
+# print(smap)
