@@ -57,5 +57,26 @@ while (key):
 for key in smap.keys():
     #print(key)
     smap[key][2] = smap[key][0] + smap[key][1]
-    print(str(key) + "," + str(smap[key][0]) + "," + str(smap[key][1]) + "," + str(smap[key][2]))
+    #print(str(key) + "," + str(smap[key][0]) + "," + str(smap[key][1]) + "," + str(smap[key][2]))
 # print(smap)
+
+#print("==============================================================================================================")
+#print("==============================================================================================================")
+
+# Initialize debian-package list maps keys from installed debian packages
+dmap = {}
+cmdstr = "dpkg-query -W -f='${Package},'"
+shellout = subprocess.Popen(cmdstr, shell=True, stdout=subprocess.PIPE).communicate()[0]
+pkglist = shellout.decode("utf-8").strip().split(",")
+for deb in pkglist:
+    dmap[deb] = 0
+
+for key in smap.keys():
+    shellout = subprocess.Popen("dpkg -S " + key + "| grep -v diversion", shell=True, stdout=subprocess.PIPE).communicate()[0]
+    shellout = shellout.decode("utf-8")
+    if shellout != "":
+        deb = shellout.split(":")[0]
+        dmap[deb] += smap[key][2]
+
+#for deb in dmap.keys():
+    #print(str(deb) + "," + str(dmap[deb]))
