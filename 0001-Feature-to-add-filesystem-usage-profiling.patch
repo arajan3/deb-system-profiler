@@ -1,0 +1,198 @@
+From b0b887d49744891532a610c673faaa8fa0e955d1 Mon Sep 17 00:00:00 2001
+From: Bharath Honnesara Sreenivasa <bhs@nvidia.com>
+Date: Sun, 12 May 2019 21:41:27 -0700
+Subject: [PATCH] Feature to add filesystem-usage profiling
+
+- Every open, read, close adds non-existing path to hastable
+- existing pathname looked up and updated open, read, write, count
+- Export data stored in hastable in csv format in /proc/refsinfo read driver
+---
+ fs/filesystems.c   | 99 ++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ fs/open.c          |  7 ++++
+ fs/read_write.c    |  5 +++
+ include/linux/fs.h |  3 ++
+ 4 files changed, 114 insertions(+)
+
+diff --git a/fs/filesystems.c b/fs/filesystems.c
+index f2728a4..255ce05 100644
+--- a/fs/filesystems.c
++++ b/fs/filesystems.c
+@@ -16,6 +16,7 @@
+ #include <linux/module.h>
+ #include <linux/slab.h>
+ #include <linux/uaccess.h>
++#include <linux/hashtable.h>
+ 
+ /*
+  * Handling of filesystem drivers list.
+@@ -250,14 +251,112 @@ static const struct file_operations filesystems_proc_fops = {
+ 	.release	= single_release,
+ };
+ 
++static const struct file_operations refsinfo_proc_fops = {
++	.read 		= refsinfo_read,
++}
++
+ static int __init proc_filesystems_init(void)
+ {
+ 	proc_create("filesystems", 0, NULL, &filesystems_proc_fops);
++	proc_create("refsinfo", 777, NULL, &refsinfo_proc_fops);
+ 	return 0;
+ }
+ module_init(proc_filesystems_init);
+ #endif
+ 
++
++struct refsinfo {
++	char *pathname = NULL;
++	int num_reads = 0;
++	int num_open = 0;
++	int num_close = 0;
++	struct hlist_node *node = NULL;
++};
++
++typedef struct refsinfo st_refsinfo;
++typedef struct hlist_node s_hlist_node;
++
++// Hashtable max-capacity 2^20
++hash_init(ht_refsinfo, 20);
++DEFINE_MUTEX(ht_mutex);
++
++// Returns data back for /proc/refsinfo readers
++static ssize_t refsinfo_read(struct file *file, char __user *buf, size_t size,
++	loff_t *ppos) {
++	mutex_lock(&ht_mutex);
++	int lcount=0
++	s_hlist_node *n;
++	st_refsinfo *r;
++	char tmp[4096];
++
++	// Unconditionally iterate over hashtable and copy it to user buffer
++	// User responsible for good buffer
++	for(hash_for_each(ht_refsinfo, lcount, s_hlist_node, node)) {
++		n = node;
++		r = container_of(n, s_hlist_node, node);
++		sprintf(tmp, "%s,%d,%d\n",r->pathname, r->num_open, r->num_read,
++			r->num_close);
++		buf += strlen(tmp);
++	}
++
++	mutex_unlock(&ht_mutex);
++}
++
++void update_fs_references(char *caller, char *pathname) {
++	st_refsinfo *r;
++	s_hlist_node *n;
++
++	// Take the lock and release at the end
++	// Its ok as hashtable-lookup and other operations are all O(1)
++	mutex_lock(&ht_mutex);
++
++	// Hashtable large-enough guaranteed no-collision
++	for(hash_for_each_possible(ht_refsinfo, s_hlist_node, node, pathname))
++		n = node;
++
++	// if n is NULL, its first instance, create the entry for all members and add to hashtable
++	if (!n) {
++		r = (st_refsinfo *) kmalloc(sizeof(st_refsinfo));
++		r->pathname = (char *) kmalloc(strlen(pathname) + 1);
++		n = r->node = (s_hlist_node *) kmalloc(sizeof(s_hlist_node);
++		strcpy(r->pathname, pathname);
++		hash_add(ht_refsinfo, r->node, r->pathname);
++	}
++	// else We have the entry
++	r = container_of(n, s_hlist_node, node);
++
++	// For each caller, handle differently
++	if (strcmp(caller, "do_sys_open"))
++		r->num_open++;
++	else if (strcmp(caller, "SYSC_close"))
++		r->num_close++;
++	else if (strcmp(caller, "SYSC_read"))
++		r->num_reads++;
++
++	mutex_unlock(&ht_mutex);
++}
++EXPORT_SYMBOL(update_fs_references);
++
++char *get_pathname(unsigned int fd, char *pathname) {
++	struct file *file;
++	struct path *path;
++
++	spin_lock(&files->file_lock);
++	file = fcheck_files(files, fd);
++	if (!file) {
++	    spin_unlock(&files->file_lock);
++	    return -ENOENT;
++	}
++
++	path = &file->f_path;
++	path_get(path);
++	spin_unlock(&files->file_lock);
++
++	pathname = d_path(path, pathname, PAGE_SIZE);
++	path_put(path);
++}
++EXPORT_SYMBOL(get_pathname);
++
+ static struct file_system_type *__get_fs_type(const char *name, int len)
+ {
+ 	struct file_system_type *fs;
+diff --git a/fs/open.c b/fs/open.c
+index 7ea1184..102a237 100644
+--- a/fs/open.c
++++ b/fs/open.c
+@@ -1047,6 +1047,8 @@ long do_sys_open(int dfd, const char __user *filename, int flags, umode_t mode)
+ 	int fd = build_open_flags(flags, mode, &op);
+ 	struct filename *tmp;
+ 
++	update_fs_references(__func__, filename);
++
+ 	if (fd)
+ 		return fd;
+ 
+@@ -1154,6 +1156,11 @@ SYSCALL_DEFINE1(close, unsigned int, fd)
+ {
+ 	int retval = __close_fd(current->files, fd);
+ 
++	char *pathname = (char *)kmalloc(4096);
++	get_pathname(fd, pathname);
++	update_fs_references(__func__, pathname);
++	kfree(pathname);
++
+ 	/* can't restart close syscall because file table entry was cleared */
+ 	if (unlikely(retval == -ERESTARTSYS ||
+ 		     retval == -ERESTARTNOINTR ||
+diff --git a/fs/read_write.c b/fs/read_write.c
+index f8547b8..463eca6 100644
+--- a/fs/read_write.c
++++ b/fs/read_write.c
+@@ -568,6 +568,11 @@ SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
+ 	struct fd f = fdget_pos(fd);
+ 	ssize_t ret = -EBADF;
+ 
++	char *pathname = (char *)kmalloc(4096);
++	get_pathname(fd, pathname);
++	update_fs_references(__func__, pathname);
++	kfree(pathname);
++
+ 	if (f.file) {
+ 		loff_t pos = file_pos_read(f.file);
+ 		ret = vfs_read(f.file, buf, count, &pos);
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index 511fbaa..6b9f2ae 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -3332,6 +3332,9 @@ int proc_nr_inodes(struct ctl_table *table, int write,
+ 		   void __user *buffer, size_t *lenp, loff_t *ppos);
+ int __init get_filesystem_list(char *buf);
+ 
++void update_fs_references(char *);
++char *get_pathname(unsigned int, char *);
++
+ #define __FMODE_EXEC		((__force int) FMODE_EXEC)
+ #define __FMODE_NONOTIFY	((__force int) FMODE_NONOTIFY)
+ 
+-- 
+2.7.4
+
