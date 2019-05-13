@@ -1,4 +1,4 @@
-wb = 100  # weight for open-close
+B = 100  # weight for open-close
 wo = 1  # weight for open
 wr = 5  # weight for read
 we = 1  # weight for exec
@@ -23,7 +23,7 @@ def get_sec(time_str):
 
 
 def score1(o, r, c):  # o=open,c=close,r=read
-    bonus = wb * (o - c)
+    bonus = B * (o - c)
     sops = wo * o + wr * r
     return bonus + sops
 
