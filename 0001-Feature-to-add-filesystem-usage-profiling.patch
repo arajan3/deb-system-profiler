@@ -6,6 +6,7 @@ Subject: [PATCH] Feature to add filesystem-usage profiling
 - Every open, read, close adds non-existing path to hastable
 - existing pathname looked up and updated open, read, write, count
 - Export data stored in hastable in csv format in /proc/refsinfo read driver
+- Applied on 4.15 stock kernel (torvalds repo)
 ---
  fs/filesystems.c   | 99 ++++++++++++++++++++++++++++++++++++++++++++++++++++++
  fs/open.c          |  7 ++++
